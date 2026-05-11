@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Terraform working directories
+.terraform/
+**/.terraform/*
+
+# Terraform local state
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Terraform variable files can contain secrets
+*.tfvars
+*.tfvars.json
+
+# Terraform plan output
+*.tfplan
+plan.out
+
+# CLI override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
