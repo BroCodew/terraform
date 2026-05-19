@@ -167,3 +167,28 @@ moved {
   from = aws_ecs_service.app
   to   = module.ecs.aws_ecs_service.app
 }
+
+moved {
+  from = module.ecr
+  to   = module.ecr["main"]
+}
+
+moved {
+  from = module.iam
+  to   = module.iam["main"]
+}
+
+moved {
+  from = module.logs
+  to   = module.logs["main"]
+}
+
+moved {
+  from = module.alb
+  to   = module.alb["main"]
+}
+
+moved {
+  from = module.ecs
+  to   = module.ecs["main"]
+}

@@ -32,3 +32,25 @@ variable "target_group_arn" {
   description = "ALB target group ARN"
   type        = string
 }
+
+variable "config" {
+  description = "ECS cluster, task, container, and service settings."
+  type = object({
+    cluster_name          = string
+    task_family           = string
+    task_cpu              = number
+    task_memory           = number
+    container_name        = string
+    image_tag             = string
+    container_port        = number
+    desired_count         = number
+    service_name          = string
+    awslogs_stream_prefix = string
+  })
+}
+
+variable "common_tags" {
+  description = "Tags applied to ECS resources."
+  type        = map(string)
+  default     = {}
+}

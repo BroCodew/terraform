@@ -1,12 +1,10 @@
 resource "aws_ecr_repository" "app" {
-  name                 = "my-ecr-repo-tr"
-  image_tag_mutability = "MUTABLE"
+  name                 = var.repository_name
+  image_tag_mutability = var.image_tag_mutability
 
   image_scanning_configuration {
-    scan_on_push = true
+    scan_on_push = var.scan_on_push
   }
 
-  tags = {
-    Name = "my-ecr-repo-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.repository_name })
 }

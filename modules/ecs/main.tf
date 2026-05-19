@@ -1,28 +1,26 @@
 resource "aws_ecs_cluster" "main" {
-  name = "my-ecs-cluster-tr"
-  tags = {
-    Name = "my-ecs-cluster-tr"
-  }
+  name = var.config.cluster_name
+  tags = merge(var.common_tags, { Name = var.config.cluster_name })
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = "my-app-task-tr"
+  family                   = var.config.task_family
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = var.config.task_cpu
+  memory                   = var.config.task_memory
   execution_role_arn       = var.execution_role_arn
 
   container_definitions = jsonencode([
     {
-      name      = "my-app"
-      image     = "${var.ecr_repository_url}:latest"
+      name      = var.config.container_name
+      image     = "${var.ecr_repository_url}:${var.config.image_tag}"
       essential = true
 
       portMappings = [
         {
-          containerPort = 3000
-          hostPort      = 3000
+          containerPort = var.config.container_port
+          hostPort      = var.config.container_port
           protocol      = "tcp"
         }
       ]
@@ -32,22 +30,20 @@ resource "aws_ecs_task_definition" "app" {
         options = {
           awslogs-group         = var.log_group_name
           awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "ecs"
+          awslogs-stream-prefix = var.config.awslogs_stream_prefix
         }
       }
     }
   ])
 
-  tags = {
-    Name = "my-app-task-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.task_family })
 }
 
 resource "aws_ecs_service" "app" {
-  name            = "my-app-service-tr"
+  name            = var.config.service_name
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = 2
+  desired_count   = var.config.desired_count
   launch_type     = "FARGATE"
 
   network_configuration {
@@ -58,11 +54,9 @@ resource "aws_ecs_service" "app" {
 
   load_balancer {
     target_group_arn = var.target_group_arn
-    container_name   = "my-app"
-    container_port   = 3000
+    container_name   = var.config.container_name
+    container_port   = var.config.container_port
   }
 
-  tags = {
-    Name = "my-app-service-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.service_name })
 }

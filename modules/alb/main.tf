@@ -1,37 +1,35 @@
 resource "aws_security_group" "alb" {
-  name        = "alb-sg-tr"
+  name        = var.config.alb_security_group_name
   description = "Allow HTTP and HTTPS traffic to ALB"
   vpc_id      = var.vpc_id
 
   ingress {
     description = "Allow HTTP traffic"
-    from_port   = 80
-    to_port     = 80
+    from_port   = var.config.listener_port
+    to_port     = var.config.listener_port
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.config.alb_ingress_cidr_blocks
   }
 
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.config.alb_egress_cidr_blocks
   }
 
-  tags = {
-    Name = "alb-sg-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.alb_security_group_name })
 }
 
 resource "aws_security_group" "ecs_task" {
-  name        = "ecs-task-sg-tr"
+  name        = var.config.ecs_task_security_group_name
   description = "Allow traffic from ALB to ECS tasks"
   vpc_id      = var.vpc_id
 
   ingress {
     description     = "Allow traffic from ALB"
-    from_port       = 3000
-    to_port         = 3000
+    from_port       = var.config.target_group_port
+    to_port         = var.config.target_group_port
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -40,53 +38,45 @@ resource "aws_security_group" "ecs_task" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.config.ecs_task_egress_cidr_blocks
   }
 
-  tags = {
-    Name = "ecs-task-sg-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.ecs_task_security_group_name })
 }
 
 resource "aws_lb" "app" {
-  name               = "app-alb-tr"
+  name               = var.config.alb_name
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
-  tags = {
-    Name = "app-alb-tr"
-  }
+  tags               = merge(var.common_tags, { Name = var.config.alb_name })
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = "app-tg-tr"
-  port        = 3000
+  name        = var.config.target_group_name
+  port        = var.config.target_group_port
   protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = var.vpc_id
   health_check {
-    path                = "/"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
-    matcher             = "200-399"
+    path                = var.config.health_check_path
+    interval            = var.config.health_check_interval
+    timeout             = var.config.health_check_timeout
+    healthy_threshold   = var.config.health_check_healthy_threshold
+    unhealthy_threshold = var.config.health_check_unhealthy_threshold
+    matcher             = var.config.health_check_matcher
   }
-  tags = {
-    Name = "app-tg-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.target_group_name })
 }
 
 resource "aws_lb_listener" "app" {
   load_balancer_arn = aws_lb.app.arn
-  port              = 80
+  port              = var.config.listener_port
   protocol          = "HTTP"
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
-  tags = {
-    Name = "app-listener-tr"
-  }
+  tags = merge(var.common_tags, { Name = var.config.listener_name })
 }
