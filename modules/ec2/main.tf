@@ -77,14 +77,14 @@ resource "aws_network_interface" "app_eni" {
   tags = merge(var.common_tags, { Name = var.config.network_interface_name })
 }
 
-resource "aws_eip" "app_eni" {
+resource "aws_eip" "app_eip" {
   domain = "vpc"
 
   tags = merge(var.common_tags, { Name = var.config.elastic_ip_name })
 }
 
 resource "aws_eip_association" "app_eip_assoc" {
-  allocation_id        = aws_eip.app_eni.id
+  allocation_id        = aws_eip.app_eip.id
   network_interface_id = aws_network_interface.app_eni.id
 }
 
