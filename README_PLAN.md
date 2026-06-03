@@ -13,9 +13,14 @@ This file reviews the current Terraform project against the attached architectur
 > - Current live config (in `terraform.tfvars`): Subdomain `app.terraformaws.online` (record_name="app"), `enabled=true`. HTTPS + Alias record active.
 > - Detailed beginner-friendly README.md added/expanded for acm, route53, alb (syntax breakdowns, examples).
 > 
-> **Still missing from plan:** WAF, Secrets Manager, NAT HA, GitLab CI/CD, full doc cleanup (root README still has old EKS content).
+> **Completed / In Progress (Steps 6 and 8):**
+> - Step 6: `modules/waf` created with AWSManagedRulesCommonRuleSet, KnownBadInputs, and custom rate-based rule. Wired via `waf.tf` and `waf_config` (disabled by default). ALB association ready.
+> - Step 8: `modules/network` updated to support `single_nat_gateway` toggle in config. Uses count + locals for 1 or 2 NATs/EIPs/route tables. Added moved blocks for state. Default remains single NAT (cheaper). Root `variables.tf` and example updated.
 > 
-> **Current request flow:** Users → Route53 (Alias for subdomain) → ALB (HTTPS 443 + HTTP 80 redirect) → ECS Fargate (when domain_config.enabled = true).
+> **Still missing from plan:** Secrets Manager, GitLab CI/CD, full doc cleanup (root README still has old EKS content), production hardening.
+> (Note: WAF module + wiring and NAT HA toggle now exist and can be enabled via config.)
+> 
+> **Current request flow:** Users → Route53 (Alias for subdomain) → (optional WAF) → ALB (HTTPS 443 + HTTP 80 redirect) → ECS Fargate (when domain_config.enabled = true).
 
 The image shows a production-style path:
 
@@ -44,13 +49,15 @@ The project has two layers:
 - `main.tf` + `modules/ec2`: a standalone public EC2 instance. This is separate from the ECS application.
 - `app.tf` + `modules/ecr`, `modules/iam`, `modules/logs`, `modules/alb`, `modules/ecs`: the modern container application stack.
 - `domain.tf` + `modules/acm` + `modules/route53`: custom domain + ACM + Route53 Alias support (new in this session). Controlled by `domain_config`.
+- `waf.tf` + `modules/waf`: WAF protection for ALB (Step 6, disabled by default).
+- `modules/network`: now supports optional HA NAT (Step 8, single_nat_gateway toggle, default single for cost).
 
 Current request flow (updated):
 
 ```text
 User
   -> Route53 (Alias record for subdomain or apex)
-  -> (optional WAF later)
+  -> (optional WAF via waf_config)
   -> ALB (HTTPS 443 with redirect from HTTP 80 when domain_config.enabled=true)
   -> ALB target group
   -> ECS Fargate tasks in private subnets
@@ -76,7 +83,7 @@ Manual Docker build/push (or future GitLab CI)
 | Public subnets A/B | Implemented | `modules/network` | No immediate change |
 | Private subnets A/B | Implemented | `modules/network` | No immediate change |
 | Internet Gateway | Implemented | `modules/network` | No immediate change |
-| NAT Gateway | Partially implemented | `modules/network` | Add optional one NAT per AZ |
+| NAT Gateway | **Implemented (optional HA)** | `modules/network` (updated with single_nat_gateway toggle) | Done. Toggle added to network_config. Supports 1 NAT (shared) or 1 per AZ. Moved blocks for state. Default = single (cheap). |
 | ECR | Implemented | `modules/ecr` | Add CI/CD push workflow |
 | ECS cluster | Implemented | `modules/ecs` | No immediate change |
 | ECS Fargate service/tasks | Implemented | `modules/ecs` | Add secrets support later |
@@ -89,7 +96,7 @@ Manual Docker build/push (or future GitLab CI)
 | Route 53 | **Implemented** (subdomain) | `modules/route53` + `domain.tf` | Done. Supports `record_name` for subdomain (e.g. "app") or apex (""). Uses Alias A record + ALB outputs. |
 | ACM certificate | **Implemented** | `modules/acm` | Done. Creates cert + auto DNS validation records in the provided zone_id. Supports SANs. |
 | HTTPS | **Implemented** | `modules/alb` (updated) + `domain_config` | Done. Conditional listeners (HTTP redirect + HTTPS 443), dynamic SG rule, `enable_https` + `certificate_arn`. Works with/without domain_config. |
-| AWS WAF | Missing | none | Add `modules/waf` |
+| AWS WAF | **Implemented** (disabled by default) | `modules/waf` + `waf.tf` | Done. Web ACL with 3 rules (2 managed + rate limit). Association to ALB. Controlled by waf_config (default disabled). |
 | Secrets Manager | Missing | none | Add `modules/secrets` and ECS wiring |
 | GitLab CI/CD | Missing | none | Add `.gitlab-ci.yml` |
 
@@ -101,29 +108,20 @@ These are the main missing project sections (updated after latest session):
 - Custom domain + Route 53 alias (Step 5)
 - ACM certificate + DNS validation (Step 3)
 - HTTPS on ALB with redirect (Step 4)
+- **WAF (Step 6)**: `modules/waf` created (managed rules + rate limit). `waf.tf` wiring with count on waf_config. ALB ARN association. Disabled by default.
+- **NAT HA option (Step 8)**: `modules/network` now has `single_nat_gateway` support (count + locals for 1 vs 2 NATs/EIPs/route tables). Moved blocks added for state. Default = true (single NAT, cheap, backward compatible). Root config and example updated.
 
 **Still missing:**
 
-1. **WAF security section**
-   - WAFv2 Web ACL.
-   - Managed rule groups.
-   - Rate limiting rule.
-   - Association with the ALB ARN.
-
-2. **Secrets section**
+1. **Secrets section**
    - Secrets Manager secret resources.
    - ECS task definition `secrets` support.
    - IAM permission for ECS to read only the required secret ARNs.
 
-3. **High availability NAT section**
-   - Current network has one NAT Gateway in public subnet A.
-   - The image shows one NAT Gateway per public subnet/AZ.
-   - Add this as an option because it increases monthly cost.
-
-4. **CI/CD section**
+2. **CI/CD section**
    - GitLab pipeline that builds, tests, scans, pushes to ECR, and redeploys ECS.
 
-5. **Documentation cleanup (Step 2)**
+3. **Documentation cleanup (Step 2)**
    - Root `README.md` still contains a lot of outdated EKS/RDS/Lambda content from the larger aspirational platform. `ARCHITECTURE.md` is accurate. Module READMEs are now excellent for beginners.
 
 ## Recommended Build Order
@@ -183,9 +181,16 @@ Note: We used direct `zone_id` + `record_name` (more flexible) instead of the pl
 
 ### Step 6: Add AWS WAF
 
-**Status: Not started**
+**Status: Completed (module + wiring added in this session)**
 
-(Create `modules/waf` ... original content unchanged)
+- New `modules/waf` with:
+  - aws_wafv2_web_acl using AWSManagedRulesCommonRuleSet, KnownBadInputsRuleSet, and custom RateLimitRule (rate_based_statement on IP).
+  - aws_wafv2_web_acl_association to ALB.
+- Root `waf_config` variable added (enabled, name, rate_limit).
+- `waf.tf` for conditional module call (count on enabled, similar to domain_config).
+- `modules/waf/README.md` with detailed beginner syntax explanation.
+- Currently disabled by default in tfvars (set enabled=true to activate).
+- Protects the ALB (works with current subdomain/HTTPS setup).
 
 ### Step 7: Add Secrets Manager Support
 
@@ -195,11 +200,16 @@ Note: We used direct `zone_id` + `record_name` (more flexible) instead of the pl
 
 ### Step 8: Add Optional One NAT Gateway Per AZ
 
-**Status: Not started**
+**Status: Completed (optional support added in this session)**
 
-- Still single NAT Gateway (in public subnet A).
-- `network_config` in variables.tf and `modules/network` do not yet expose `single_nat_gateway` toggle.
-- Original recommendation still applies.
+- `modules/network/variables.tf`: added `single_nat_gateway = bool` to the config object type.
+- `modules/network/main.tf`: full conditional logic using `local.nat_count`, count on EIP/NAT/RouteTable, conditional associations for private_b. Comments explain single vs HA mode.
+- Added `moved` blocks in the module for smooth state transition from previous non-count resources.
+- Root `variables.tf`: added `single_nat_gateway = true` to network_config default (keeps current behavior).
+- `terraform.tfvars.example` updated with comment.
+- `modules/network/README.md` updated with new diagram text and list.
+- Default remains `true` (1 shared NAT) for cost/learning. Set to `false` in network_config to enable HA (1 NAT per AZ, separate route tables).
+- Note: Changing to false will create additional resources; review plan carefully (may affect existing private subnet internet access briefly during apply).
 
 ### Step 9: Add GitLab CI/CD
 
@@ -286,9 +296,9 @@ Expected checks by milestone:
 |---|---|
 | Current ECS core | `http://ALB_DNS_NAME` returns the app |
 | HTTPS + Route 53 (subdomain) | `https://app.terraformaws.online` resolves to ALB + has valid cert (when `domain_config.enabled = true`) |
-| WAF | WAF Web ACL is associated with ALB |
+| WAF | WAF Web ACL is associated with ALB (when waf_config.enabled = true) |
 | Secrets | ECS task starts and app can read secret env vars |
-| NAT HA | Private subnet A routes to NAT A, private subnet B routes to NAT B |
+| NAT HA | (Optional) Private subnets use per-AZ NATs when single_nat_gateway=false in network_config |
 | CI/CD | New GitLab commit produces new ECR image and ECS deployment |
 
 ## Short Next Step (Updated)
@@ -307,18 +317,16 @@ Expected checks by milestone:
 2. **Add GitLab CI/CD (Step 9)**  
    This was the top of the original image. High value for the "image/deploy flow".
 
-3. **Add AWS WAF (Step 6)**  
-   Security layer in front of the ALB. Relatively self-contained.
-
-4. **Add Secrets Manager (Step 7)**  
+3. **Add Secrets Manager (Step 7)**  
    For real apps you will need this.
 
-5. **NAT HA + production hardening (Steps 8 + 10)**
+4. **Production hardening (Step 10)**  
+   (WAF and NAT HA options already available to enable when ready.)
 
-**Current recommended commands for the user:**
+**Current recommended commands for the user (after WAF/NAT updates):**
 
 ```bash
-# Verify current subdomain + HTTPS setup
+# Verify current subdomain + HTTPS + optional WAF/NAT setup
 terraform fmt -recursive
 terraform validate
 terraform plan
@@ -327,6 +335,10 @@ terraform output
 # Check the live DNS record
 dig app.terraformaws.online
 ```
+
+To try WAF: uncomment/enable in terraform.tfvars and re-plan/apply.
+
+To try NAT HA: override `single_nat_gateway = false` inside your network_config block and review the plan (will add resources).
 
 After the above, the next big win is cleaning docs + adding the CI/CD pipeline. 
 
