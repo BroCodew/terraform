@@ -45,6 +45,9 @@ variable "network_config" {
     public_route_cidr_block  = string
     private_route_cidr_block = string
     map_public_ip_on_launch  = bool
+
+    # Step 8: single NAT (true = cheaper, one NAT shared) or HA (false = one NAT per AZ)
+    single_nat_gateway = bool
   })
   default = {
     vpc_cidr                 = "10.0.0.0/16"
@@ -68,6 +71,7 @@ variable "network_config" {
     public_route_cidr_block  = "0.0.0.0/0"
     private_route_cidr_block = "0.0.0.0/0"
     map_public_ip_on_launch  = true
+    single_nat_gateway       = true
   }
 }
 
@@ -221,4 +225,31 @@ variable "domain_config" {
     record_name               = ""
   }
 }
+
+variable "waf_config" {
+  description = <<EOF
+  Configuration for AWS WAF in front of the ALB.
+  Enable to add managed rules + rate limiting protection.
+
+  Example:
+    waf_config = {
+      enabled    = true
+      name       = "app-waf"
+      rate_limit = 2000
+    }
+  EOF
+
+  type = object({
+    enabled    = bool
+    name       = string
+    rate_limit = optional(number, 2000)
+  })
+
+  default = {
+    enabled    = false
+    name       = ""
+    rate_limit = 2000
+  }
+}
+
 

@@ -11,37 +11,42 @@ This module creates:
 - One public route table
 - Public route table associations
 - Two private subnets
-- One Elastic IP for the NAT Gateway
-- One NAT Gateway
-- One private route table
-- Private route table associations
+- NAT Gateway(s) + EIP(s)   ← controlled by single_nat_gateway (Step 8)
+- Private route table(s)    ← one shared or one per AZ depending on the flag
 
 ## Big Picture
 
-The network looks like this:
+The network looks like this (when single_nat_gateway = true, the default for learning):
 
 ```text
 VPC
 |
-+-- Public subnet A
++-- Public subnet A (AZ-a)
+|   |
+|   +-- Route to Internet Gateway
+|   |
+|   +-- NAT Gateway (shared)
+|
++-- Public subnet B (AZ-b)
 |   |
 |   +-- Route to Internet Gateway
 |
-+-- Public subnet B
++-- Private subnet A (AZ-a)
 |   |
-|   +-- Route to Internet Gateway
+|   +-- Route to shared NAT Gateway
 |
-+-- Private subnet A
-|   |
-|   +-- Route to NAT Gateway
-|
-+-- Private subnet B
++-- Private subnet B (AZ-b)
     |
-    +-- Route to NAT Gateway
+    +-- Route to shared NAT Gateway
 ```
 
+When single_nat_gateway = false (HA mode):
+- NAT Gateway in Public A for Private A only
+- NAT Gateway in Public B for Private B only
+- Separate private route tables
+
 Public subnets can reach the internet through the Internet Gateway.
-Private subnets can reach the internet through the NAT Gateway, but the internet cannot directly start connections to private subnet resources.
+Private subnets can reach the internet through the NAT Gateway(s), but the internet cannot directly start connections to private subnet resources.
 
 ## Example Input Values
 

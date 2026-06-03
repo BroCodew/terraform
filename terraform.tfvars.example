@@ -32,6 +32,7 @@ common_tags = {
 #   public_route_cidr_block  = "0.0.0.0/0"
 #   private_route_cidr_block = "0.0.0.0/0"
 #   map_public_ip_on_launch  = true
+#   single_nat_gateway       = true   # Step 8: set false for one NAT per AZ (HA, more $)
 # }
 
 # Example: override app stack values or add another stack key.
@@ -92,4 +93,11 @@ common_tags = {
 #   domain_name = "app.terraformaws.online"
 #   record_name = "app"
 #   # subject_alternative_names = ["terraformaws.online"]  # optional extra names on the cert
+# }
+
+# === AWS WAF (protect ALB - Step 6 in README_PLAN.md) ===
+# waf_config = {
+#   enabled    = true
+#   name       = "app-waf"
+#   rate_limit = 2000   # max requests per IP in 5 minutes before blocking
 # }

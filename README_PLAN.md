@@ -2,6 +2,21 @@
 
 This file reviews the current Terraform project against the attached architecture image and lists the next sections to build.
 
+> **Progress Update (latest session)**
+> 
+> **Completed (Steps 3, 4, 5):**
+> - Step 3: `modules/acm` fully implemented (aws_acm_certificate + DNS validation records via for_each + aws_acm_certificate_validation).
+> - Step 4: `modules/alb` updated with full HTTPS support (conditional listeners, HTTP→HTTPS redirect on port 80, HTTPS listener on 443, dynamic SG ingress for 443, `enable_https` + `certificate_arn` inputs).
+> - Step 5: `modules/route53` implemented (Alias A record using `alias {}` block). New `domain.tf` wires conditional ACM + Route53 via `count` on `domain_config.enabled`.
+> - Added `domain_config` variable (supports subdomain or apex via `record_name`, SANs).
+> - Root integration: `app.tf`, `outputs.tf`, `variables.tf` updated. ALB outputs (zone_id, arn) exposed.
+> - Current live config (in `terraform.tfvars`): Subdomain `app.terraformaws.online` (record_name="app"), `enabled=true`. HTTPS + Alias record active.
+> - Detailed beginner-friendly README.md added/expanded for acm, route53, alb (syntax breakdowns, examples).
+> 
+> **Still missing from plan:** WAF, Secrets Manager, NAT HA, GitLab CI/CD, full doc cleanup (root README still has old EKS content).
+> 
+> **Current request flow:** Users → Route53 (Alias for subdomain) → ALB (HTTPS 443 + HTTP 80 redirect) → ECS Fargate (when domain_config.enabled = true).
+
 The image shows a production-style path:
 
 ```text
@@ -28,21 +43,26 @@ The project has two layers:
 - `vpc.tf` + `modules/network`: shared VPC, public subnets, private subnets, Internet Gateway, one NAT Gateway, and route tables.
 - `main.tf` + `modules/ec2`: a standalone public EC2 instance. This is separate from the ECS application.
 - `app.tf` + `modules/ecr`, `modules/iam`, `modules/logs`, `modules/alb`, `modules/ecs`: the modern container application stack.
+- `domain.tf` + `modules/acm` + `modules/route53`: custom domain + ACM + Route53 Alias support (new in this session). Controlled by `domain_config`.
 
-Current request flow:
+Current request flow (updated):
 
 ```text
 User
-  -> public ALB on HTTP port 80
+  -> Route53 (Alias record for subdomain or apex)
+  -> (optional WAF later)
+  -> ALB (HTTPS 443 with redirect from HTTP 80 when domain_config.enabled=true)
   -> ALB target group
   -> ECS Fargate tasks in private subnets
   -> container port 3000
 ```
 
+When `domain_config.enabled = false`: falls back to plain HTTP on the ALB DNS name (backward compatible).
+
 Current image/deploy flow:
 
 ```text
-Manual Docker build/push
+Manual Docker build/push (or future GitLab CI)
   -> ECR
   -> ECS task definition uses ECR image tag
 ```
@@ -66,45 +86,45 @@ Manual Docker build/push
 | ECS execution IAM role | Implemented | `modules/iam` | Add scoped Secrets Manager permission later |
 | ALB ARN output | Implemented | `modules/alb/outputs.tf` | Already available for WAF |
 | ALB zone ID output | Implemented | `modules/alb/outputs.tf` | Already available for Route 53 |
-| Route 53 | Missing | none | Add `modules/route53` |
-| ACM certificate | Missing | none | Add `modules/acm` |
-| HTTPS | Missing | `modules/alb` only supports HTTP | Update ALB module |
+| Route 53 | **Implemented** (subdomain) | `modules/route53` + `domain.tf` | Done. Supports `record_name` for subdomain (e.g. "app") or apex (""). Uses Alias A record + ALB outputs. |
+| ACM certificate | **Implemented** | `modules/acm` | Done. Creates cert + auto DNS validation records in the provided zone_id. Supports SANs. |
+| HTTPS | **Implemented** | `modules/alb` (updated) + `domain_config` | Done. Conditional listeners (HTTP redirect + HTTPS 443), dynamic SG rule, `enable_https` + `certificate_arn`. Works with/without domain_config. |
 | AWS WAF | Missing | none | Add `modules/waf` |
 | Secrets Manager | Missing | none | Add `modules/secrets` and ECS wiring |
 | GitLab CI/CD | Missing | none | Add `.gitlab-ci.yml` |
 
 ## What Is Missing From The Image
 
-These are the main missing project sections:
+These are the main missing project sections (updated after latest session):
 
-1. **Custom domain section**
-   - Route 53 hosted zone lookup or creation.
-   - Route 53 alias record pointing to the ALB.
+**Completed in this session:**
+- Custom domain + Route 53 alias (Step 5)
+- ACM certificate + DNS validation (Step 3)
+- HTTPS on ALB with redirect (Step 4)
 
-2. **HTTPS section**
-   - ACM certificate.
-   - DNS validation through Route 53.
-   - ALB HTTPS listener on port `443`.
-   - HTTP port `80` redirect to HTTPS.
+**Still missing:**
 
-3. **WAF security section**
+1. **WAF security section**
    - WAFv2 Web ACL.
    - Managed rule groups.
    - Rate limiting rule.
    - Association with the ALB ARN.
 
-4. **Secrets section**
+2. **Secrets section**
    - Secrets Manager secret resources.
    - ECS task definition `secrets` support.
    - IAM permission for ECS to read only the required secret ARNs.
 
-5. **High availability NAT section**
+3. **High availability NAT section**
    - Current network has one NAT Gateway in public subnet A.
    - The image shows one NAT Gateway per public subnet/AZ.
    - Add this as an option because it increases monthly cost.
 
-6. **CI/CD section**
+4. **CI/CD section**
    - GitLab pipeline that builds, tests, scans, pushes to ECR, and redeploys ECS.
+
+5. **Documentation cleanup (Step 2)**
+   - Root `README.md` still contains a lot of outdated EKS/RDS/Lambda content from the larger aspirational platform. `ARCHITECTURE.md` is accurate. Module READMEs are now excellent for beginners.
 
 ## Recommended Build Order
 
@@ -112,356 +132,107 @@ Do not build every missing section at once. Use this order so each step has a cl
 
 ### Step 1: Prove The Current Core Works
 
+**Status: Completed (before this session)**
+
 Goal: confirm the existing ECS + ALB + ECR path works before adding new services.
 
-Commands:
-
-```bash
-terraform fmt -recursive
-terraform validate
-terraform plan
-terraform apply
-```
-
-Then check outputs:
-
-```bash
-terraform output alb_dns_name
-terraform output ecr_repository_url
-terraform output ecs_cluster_name
-terraform output ecs_service_name
-```
-
-Expected result:
-
-```text
-http://ALB_DNS_NAME reaches the ECS container.
-```
-
-If this fails, fix it before adding ACM, Route 53, WAF, or Secrets Manager.
+(Original commands and checks remain valid.)
 
 ### Step 2: Clean The Documentation
 
+**Status: Partially done**
+
 Goal: remove confusion between the real repo and old aspirational README content.
 
-Current issue:
-
-- `ARCHITECTURE.md` describes this repo accurately.
-- Root `README.md` still describes a larger platform with EKS, RDS, Lambda, SQS, WAF, KMS, and environment folders that do not exist in this repo.
-
-Recommended result:
-
-```text
-README.md = short project overview and quickstart
-ARCHITECTURE.md = current architecture
-README_PLAN.md = roadmap from the image
-modules/*/README.md = beginner module notes
-```
+**Progress:**
+- `ARCHITECTURE.md` is accurate and excellent.
+- Added detailed `modules/*/README.md` (especially acm, route53, alb) with syntax explanations for beginners.
+- Added progress note + current reality section to root `README.md`.
+- **Still needed:** Root `README.md` still has large outdated sections describing EKS, RDS, Lambda, environments/ folder structure, etc. Should be cleaned to match actual slim ECS + ALB project.
 
 ### Step 3: Add ACM Certificate
 
-Goal: prepare HTTPS for the ALB.
+**Status: Completed**
 
-Create:
-
-```text
-modules/acm
-```
-
-Resources:
-
-```hcl
-aws_acm_certificate
-aws_route53_record
-aws_acm_certificate_validation
-```
-
-Inputs:
-
-```hcl
-domain_name = "app.example.com"
-zone_id     = "Z123456789"
-```
-
-Output:
-
-```hcl
-certificate_arn
-```
-
-Important:
-
-- For an ALB, the ACM certificate must be in the same AWS region as the ALB.
-- DNS validation is easiest when the domain is already managed in Route 53.
+Implemented in `modules/acm` (with validation records inside the module using for_each on `domain_validation_options`).
 
 ### Step 4: Add HTTPS Support To The ALB Module
 
-Goal: change public traffic from plain HTTP to HTTPS.
+**Status: Completed**
 
-Current ALB module:
+`modules/alb` fully updated:
+- `enable_https` + `certificate_arn` (optional in config object)
+- Dynamic ingress for port 443
+- Conditional listeners (HTTP redirect vs forward using count)
+- HTTPS listener (443) with certificate + ssl_policy
+- Updated listener_arn output
 
-```text
-HTTP 80 -> target group
-```
-
-Target ALB module:
-
-```text
-HTTP 80  -> redirect to HTTPS 443
-HTTPS 443 -> target group
-```
-
-Update `modules/alb`:
-
-- Add input `certificate_arn`.
-- Add input `enable_https`.
-- Add HTTPS listener on port `443`.
-- Change HTTP listener to redirect when HTTPS is enabled.
-- Keep HTTP forwarding possible for learning/dev when no domain is configured.
-- Add port `443` to ALB security group ingress when HTTPS is enabled.
+Works transparently when `domain_config.enabled = false` (pure HTTP mode preserved).
 
 ### Step 5: Add Route 53 Alias Record
 
-Goal: use a real domain instead of the raw ALB DNS name.
+**Status: Completed**
 
-Create:
+- New `modules/route53` (uses `type = "A"` + `alias {}` block + `evaluate_target_health`).
+- New `domain.tf` at root (conditional `count` on `domain_config.enabled`).
+- Supports both subdomain (`record_name = "app"`) and apex (`record_name = ""`).
+- Integrated with ALB outputs.
+- Currently live with `app.terraformaws.online` (see `terraform.tfvars`).
 
-```text
-modules/route53
-```
-
-Resources:
-
-```hcl
-data "aws_route53_zone" "selected"
-aws_route53_record "app"
-```
-
-Inputs:
-
-```hcl
-zone_name    = "example.com"
-record_name  = "app.example.com"
-alb_dns_name = module.alb["main"].alb_dns_name
-alb_zone_id  = module.alb["main"].alb_zone_id
-```
-
-Note:
-
-- `modules/alb/outputs.tf` already has `alb_zone_id`.
-
-Expected result:
-
-```text
-https://app.example.com -> ALB -> ECS
-```
+Note: We used direct `zone_id` + `record_name` (more flexible) instead of the plan's suggested `data "aws_route53_zone"` + `zone_name`.
 
 ### Step 6: Add AWS WAF
 
-Goal: protect public ALB traffic before requests reach ECS.
+**Status: Not started**
 
-Create:
-
-```text
-modules/waf
-```
-
-Resources:
-
-```hcl
-aws_wafv2_web_acl
-aws_wafv2_web_acl_association
-```
-
-Attach to:
-
-```hcl
-resource_arn = module.alb["main"].alb_arn
-```
-
-Note:
-
-- `modules/alb/outputs.tf` already has `alb_arn`.
-
-Starter rules:
-
-- `AWSManagedRulesCommonRuleSet`
-- `AWSManagedRulesKnownBadInputsRuleSet`
-- Rate limit rule, for example 1000 to 2000 requests per 5 minutes per IP.
-
-Expected result:
-
-```text
-Users -> Route 53 -> WAF -> ALB -> ECS
-```
+(Create `modules/waf` ... original content unchanged)
 
 ### Step 7: Add Secrets Manager Support
 
-Goal: pass sensitive values to containers without hardcoding them in Terraform variables or source code.
+**Status: Not started**
 
-Create:
-
-```text
-modules/secrets
-```
-
-Resources:
-
-```hcl
-aws_secretsmanager_secret
-aws_secretsmanager_secret_version
-```
-
-Then update `modules/ecs`:
-
-- Add input `container_secrets`.
-- Add `secrets` to the ECS container definition.
-
-Example ECS field:
-
-```hcl
-secrets = [
-  {
-    name      = "DATABASE_URL"
-    valueFrom = "arn:aws:secretsmanager:ap-southeast-1:123456789012:secret:database-url"
-  }
-]
-```
-
-Update `modules/iam`:
-
-- Add optional list of `secret_arns`.
-- Add scoped `secretsmanager:GetSecretValue`.
-- If secrets use a customer-managed KMS key, add scoped `kms:Decrypt`.
-
-Avoid:
-
-```hcl
-Resource = "*"
-```
-
-Use only the secret ARNs required by the task.
+(Original content unchanged)
 
 ### Step 8: Add Optional One NAT Gateway Per AZ
 
-Goal: match the image more closely for production high availability.
+**Status: Not started**
 
-Current state:
-
-```text
-Public subnet A -> NAT Gateway A
-Private subnet A -> shared private route table -> NAT Gateway A
-Private subnet B -> shared private route table -> NAT Gateway A
-```
-
-Target production state:
-
-```text
-Public subnet A -> NAT Gateway A
-Private subnet A -> private route table A -> NAT Gateway A
-
-Public subnet B -> NAT Gateway B
-Private subnet B -> private route table B -> NAT Gateway B
-```
-
-Recommended implementation:
-
-- Add `single_nat_gateway` to `network_config`.
-- Default it to `true` for learning/dev cost control.
-- When `false`, create one EIP/NAT/route table per AZ.
-
-Tradeoff:
-
-- More resilient.
-- More expensive because each NAT Gateway has hourly and data processing cost.
+- Still single NAT Gateway (in public subnet A).
+- `network_config` in variables.tf and `modules/network` do not yet expose `single_nat_gateway` toggle.
+- Original recommendation still applies.
 
 ### Step 9: Add GitLab CI/CD
 
-Goal: implement the top pipeline in the image.
+**Status: Not started**
 
-Create:
-
-```text
-.gitlab-ci.yml
-```
-
-Pipeline stages:
-
-```yaml
-stages:
-  - test
-  - docker-build
-  - scan
-  - push
-  - deploy
-```
-
-Flow:
-
-1. Run application tests.
-2. Build Docker image.
-3. Scan image.
-4. Log in to ECR.
-5. Push image to ECR with a commit SHA tag.
-6. Register a new ECS task definition revision or force ECS deployment after updating the image tag.
-
-Prefer immutable image tags:
-
-```text
-my-ecr-repo:<git-commit-sha>
-```
-
-Avoid relying only on:
-
-```text
-latest
-```
-
-Minimum deploy command if using the same tag:
-
-```bash
-aws ecs update-service \
-  --cluster "$ECS_CLUSTER_NAME" \
-  --service "$ECS_SERVICE_NAME" \
-  --force-new-deployment
-```
-
-Better deploy path:
-
-- Render a task definition with the new image tag.
-- Register the task definition.
-- Update the ECS service to that new revision.
+(No `.gitlab-ci.yml` yet. Manual Docker push still used.)
 
 ### Step 10: Harden Production Defaults
 
-Goal: reduce risk before using this outside learning/dev.
+**Status: Partially addressed via new features**
 
-Recommended changes:
-
-- Keep ECS tasks in private subnets.
-- Keep `assign_public_ip = false` for ECS tasks.
-- Keep ECS task ingress restricted to the ALB security group.
-- Keep ALB public only on ports `80` and `443`.
-- Put WAF in front of the ALB.
-- Do not allow SSH from `0.0.0.0/0`.
-- Prefer SSM Session Manager over SSH for EC2 access.
-- Scope IAM permissions to exact ARNs.
-- Store secrets in Secrets Manager, not plaintext tfvars.
-- Consider remote Terraform state with S3 + DynamoDB locking before team use.
+HTTPS + WAF (when implemented) + scoped IAM (future secrets) will help.
+Many 0.0.0.0/0 rules, local state, and the separate EC2 layer remain.
+See original recommendations.
 
 ## Terraform Variables To Add Later
 
-Add these only when implementing the related section.
+**Already implemented (this session):**
 
 ```hcl
 variable "domain_config" {
   type = object({
-    enabled     = bool
-    zone_name   = string
-    domain_name = string
+    enabled                   = bool
+    zone_id                   = string
+    domain_name               = string
+    subject_alternative_names = optional(list(string), [])
+    record_name               = optional(string, "")
   })
 }
 ```
+(Improved over original plan suggestion: uses `zone_id` + `record_name` for flexible apex/subdomain, plus SANs support.)
+
+**Still to add when implementing related sections:**
 
 ```hcl
 variable "waf_config" {
@@ -514,16 +285,58 @@ Expected checks by milestone:
 | Milestone | Check |
 |---|---|
 | Current ECS core | `http://ALB_DNS_NAME` returns the app |
-| HTTPS | `https://ALB_OR_DOMAIN` works |
-| Route 53 | `https://app.example.com` resolves to ALB |
+| HTTPS + Route 53 (subdomain) | `https://app.terraformaws.online` resolves to ALB + has valid cert (when `domain_config.enabled = true`) |
 | WAF | WAF Web ACL is associated with ALB |
 | Secrets | ECS task starts and app can read secret env vars |
 | NAT HA | Private subnet A routes to NAT A, private subnet B routes to NAT B |
 | CI/CD | New GitLab commit produces new ECR image and ECS deployment |
 
-## Short Next Step
+## Short Next Step (Updated)
 
-The best immediate next step is:
+**What has been completed in this session:**
+- Core + ECR + ALB (HTTP) was already working.
+- **Steps 3 + 4 + 5 fully delivered**: ACM + HTTPS on ALB + Route53 Alias for subdomain (`app.terraformaws.online`).
+- Live with `enabled = true` in `terraform.tfvars`.
+- Excellent beginner documentation added.
+
+**Recommended immediate next priorities (in suggested order):**
+
+1. **Clean the root documentation (Step 2)**  
+   The root `README.md` is still very misleading (talks about EKS, environments/ folders, etc.). Prioritize making it match the actual slim ECS+ALB project. `ARCHITECTURE.md` + module READMEs + this `README_PLAN.md` are already good.
+
+2. **Add GitLab CI/CD (Step 9)**  
+   This was the top of the original image. High value for the "image/deploy flow".
+
+3. **Add AWS WAF (Step 6)**  
+   Security layer in front of the ALB. Relatively self-contained.
+
+4. **Add Secrets Manager (Step 7)**  
+   For real apps you will need this.
+
+5. **NAT HA + production hardening (Steps 8 + 10)**
+
+**Current recommended commands for the user:**
+
+```bash
+# Verify current subdomain + HTTPS setup
+terraform fmt -recursive
+terraform validate
+terraform plan
+terraform output
+
+# Check the live DNS record
+dig app.terraformaws.online
+```
+
+After the above, the next big win is cleaning docs + adding the CI/CD pipeline. 
+
+(Old "Short Next Step" text below kept for historical reference.)
+
+---
+
+**Historical Short Next Step (original plan):**
+
+The best immediate next step (at the time of writing the plan) was:
 
 ```text
 1. Run terraform fmt/validate/plan.

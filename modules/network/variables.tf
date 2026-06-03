@@ -22,6 +22,11 @@ variable "config" {
     public_route_cidr_block  = string
     private_route_cidr_block = string
     map_public_ip_on_launch  = bool
+
+    # For Step 8 in README_PLAN.md: high availability NAT
+    # true  = one NAT (cheaper, in public subnet A, shared by both private subnets)
+    # false = one NAT per AZ (more resilient, more expensive)
+    single_nat_gateway = bool
   })
 }
 
