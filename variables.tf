@@ -191,4 +191,34 @@ variable "app_stacks" {
   }
 }
 
+variable "domain_config" {
+  description = <<EOF
+  Configuration for custom domain + ACM certificate + Route53 alias record.
+  Set enabled = true after you have created the Route53 hosted zone and updated nameservers at your registrar.
+
+  Example:
+    domain_config = {
+      enabled     = true
+      zone_id     = "Z02237983SGZXT8DWH3PD"
+      domain_name = "app.terraformaws.online"
+      record_name = "app"
+    }
+  EOF
+
+  type = object({
+    enabled                   = bool
+    zone_id                   = string
+    domain_name               = string
+    subject_alternative_names = optional(list(string), [])
+    record_name               = optional(string, "")
+  })
+
+  default = {
+    enabled                   = false
+    zone_id                   = ""
+    domain_name               = ""
+    subject_alternative_names = []
+    record_name               = ""
+  }
+}
 

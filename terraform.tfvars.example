@@ -72,3 +72,24 @@ common_tags = {
 #     awslogs_stream_prefix            = "ecs"
 #   }
 # }
+
+# === Custom domain + HTTPS (ACM + Route53) ===
+# After you create the hosted zone in Route53 and update nameservers at your registrar,
+# set enabled = true and fill in the values from the Route53 console.
+#
+# For the APEX (root) domain terraformaws.online itself:
+# domain_config = {
+#   enabled     = true
+#   zone_id     = "Z02237983SGZXT8DWH3PD"   # Hosted zone ID from Route53
+#   domain_name = "terraformaws.online"      # <--- your real domain (apex)
+#   record_name = ""                         # empty string = apex/root domain
+# }
+#
+# Or for a subdomain (recommended while testing):
+# domain_config = {
+#   enabled     = true
+#   zone_id     = "Z02237983SGZXT8DWH3PD"
+#   domain_name = "app.terraformaws.online"
+#   record_name = "app"
+#   # subject_alternative_names = ["terraformaws.online"]  # optional extra names on the cert
+# }

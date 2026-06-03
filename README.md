@@ -212,3 +212,51 @@ The current configuration passed:
 terraform fmt -check -recursive
 terraform validate
 ```
+
+## Recent Addition: Custom Domain + HTTPS (ACM + Route53 + ALB Listeners)
+
+We implemented the next major pieces from `README_PLAN.md` (Steps 3, 4, 5) so you can use your real domain (`terraformaws.online`) with a proper certificate.
+
+### New / Changed Files
+
+- `domain.tf` (new) — contains the conditional `module "acm"` and `module "route53"` calls using `count`.
+- `variables.tf` — added the `domain_config` object variable (with `enabled`, `zone_id`, `domain_name`, `record_name`, etc.).
+- `app.tf` — injects `enable_https` + `certificate_arn` into the ALB config map.
+- `outputs.tf` — now also exports `alb_zone_id`, `alb_arn`, and `acm_certificate_arn`.
+- `modules/acm/` (completely new module)
+- `modules/route53/` (completely new module)
+- `modules/alb/` — updated to support HTTPS listeners, redirect, conditional security group rule, and smarter outputs.
+
+### How to Activate
+
+See the commented example at the bottom of `terraform.tfvars.example`, or add this to your `terraform.tfvars`:
+
+```hcl
+domain_config = {
+  enabled     = true
+  zone_id     = "Z02237983SGZXT8DWH3PD"     # from your Route53 hosted zone
+  domain_name = "app.terraformaws.online"
+  record_name = "app"
+}
+```
+
+Then run the normal `fmt / validate / plan / apply`.
+
+### Detailed Syntax Teaching
+
+The best place to learn the exact Terraform syntax we added is inside the per-module README files (they contain long beginner-friendly line-by-line breakdowns):
+
+- [modules/acm/README.md](modules/acm/README.md) — full explanation of `aws_acm_certificate`, the `for` expression + `for_each` for validation records, `aws_acm_certificate_validation`, `count` on modules, safe ternary access to `module.acm[0]`, etc.
+- [modules/route53/README.md](modules/route53/README.md) — detailed breakdown of the `alias {}` block, why you need the ALB's zone ID (not your domain zone ID), cross-module references with `module.alb["main"]`, `count` pattern again.
+- [modules/alb/README.md](modules/alb/README.md) — new long section "HTTPS + Custom Domain Support" explaining `optional()` in object types, `dynamic "ingress"`, the `count` trick for listeners (why we have both `app` and `http_redirect` resources), redirect action syntax, `ssl_policy`, and how the output ternary with `[0]` indexing works.
+
+These READMEs were written in the Adam teaching style (small steps, define every keyword, show before/after mental models, and explicit syntax tables where helpful).
+
+### Important Notes for This Feature
+
+- The feature is fully **opt-in** via `domain_config.enabled`. When false, the plan should only do the ongoing state "moved" work from the earlier refactoring and add the new root outputs.
+- You **must** have delegated the nameservers at your domain registrar before ACM validation or the Route53 alias will do anything useful on the public internet.
+- When you first flip `enabled = true`, Terraform will replace the listener on port 80 (forward → redirect) and add the 443 listener. This is expected and low-risk for the ALB itself.
+- After apply, visit `https://your-chosen-name` — the padlock should appear and your ECS app should load.
+
+See also `ARCHITECTURE.md` (current reality) and `README_PLAN.md` (the original roadmap we are following).

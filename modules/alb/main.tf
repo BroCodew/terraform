@@ -11,6 +11,18 @@ resource "aws_security_group" "alb" {
     cidr_blocks = var.config.alb_ingress_cidr_blocks
   }
 
+  # Allow HTTPS on the ALB when we have a certificate (plan: Step 4)
+  dynamic "ingress" {
+    for_each = var.config.enable_https ? [1] : []
+    content {
+      description = "Allow HTTPS traffic"
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = var.config.alb_ingress_cidr_blocks
+    }
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -70,13 +82,62 @@ resource "aws_lb_target_group" "app" {
   tags = merge(var.common_tags, { Name = var.config.target_group_name })
 }
 
+# HTTP listener on the configured port (usually 80 from listener_port).
+# We use count so that the original resource address "app" only exists when NOT using HTTPS.
+# This keeps the current (no domain) behavior 100% unchanged until you enable domain_config.
+
+# Forwarding version (used when HTTPS is disabled) — keeps exact same behavior as before.
 resource "aws_lb_listener" "app" {
+  count = var.config.enable_https ? 0 : 1
+
   load_balancer_arn = aws_lb.app.arn
   port              = var.config.listener_port
   protocol          = "HTTP"
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
   }
+
   tags = merge(var.common_tags, { Name = var.config.listener_name })
+}
+
+# Redirect version on port 80 (used when HTTPS is enabled).
+# All HTTP traffic will be redirected to HTTPS with 301.
+resource "aws_lb_listener" "http_redirect" {
+  count = var.config.enable_https ? 1 : 0
+
+  load_balancer_arn = aws_lb.app.arn
+  port              = var.config.listener_port
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+
+  tags = merge(var.common_tags, { Name = var.config.listener_name })
+}
+
+# HTTPS listener on port 443. Only created when a certificate is provided and enabled.
+resource "aws_lb_listener" "https" {
+  count = var.config.enable_https ? 1 : 0
+
+  load_balancer_arn = aws_lb.app.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = var.config.certificate_arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.app.arn
+  }
+
+  tags = merge(var.common_tags, { Name = "${var.config.listener_name}-https" })
 }

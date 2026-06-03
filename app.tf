@@ -56,6 +56,10 @@ module "alb" {
     alb_ingress_cidr_blocks          = each.value.alb_ingress_cidr_blocks
     alb_egress_cidr_blocks           = each.value.alb_egress_cidr_blocks
     ecs_task_egress_cidr_blocks      = each.value.ecs_task_egress_cidr_blocks
+
+    # HTTPS / custom domain support (comes from top-level domain_config)
+    enable_https    = var.domain_config.enabled
+    certificate_arn = var.domain_config.enabled && length(module.acm) > 0 ? module.acm[0].certificate_arn : null
   }
   common_tags = var.common_tags
 }
